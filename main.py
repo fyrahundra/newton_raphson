@@ -10,30 +10,49 @@ from matplotlib.backends.backend_tkagg import (
 )
 
 function = "x"
-function_var = None
+derivative = "1"
 
 # =========================
 # Parser för funktionsskrivning
 # =========================
 
 def parse_function(func_str):
-    pass
+    # Ersätt ^ med **
+    func_str = func_str.replace("^", "**")
+    print(f"Parsing function: {func_str}")
 
+    # Skapa en lambda-funktion
+    try:
+        func = eval(f"lambda x: {func_str}")
+        return func, func_str
+    except Exception as e:
+        print(f"Fel i funktionsskrivning: {e}")
+        return lambda x: 0
+
+def common_derivative(func_str):
+    derivative_str = "1"
+    if "x**" in func_str:
+        power = func_str.split("x**")[1].split()[0]
+        if power.isdigit():
+            n = int(power)
+            derivative_str = f"{n}*x**{n-1}"
+    elif "x" in func_str:
+        derivative_str = "1"
+    return derivative_str
 # =========================
 # Funktion och derivata
 # =========================
 
 def f(x):
-    if function == "x^2":
-        return x ** 2
-    else:
-        return x
+    print(f"parse_function(function)(x): {parse_function(function)[1]} with x={x}")
+    return parse_function(function)[0](x)
+
+def derivative_fallback(x):
+    h = 1e-7
+    return (f(x + h) - f(x - h)) / (2 * h)
 
 def df(x):
-    if function == "x^2":
-        return 2 * x
-    else:
-        return 1
+    return parse_function(common_derivative(function))[0](x)
 
 # =========================
 # Newton-Raphson
@@ -62,12 +81,15 @@ def newton_raphson(x0, iterations):
 # Uppdatera graf
 # =========================
 
+def callback():
+    update_plot()
+
 def update_plot():
 
     global function
 
-    if function_var is not None:
-        function = function_var.get().strip()
+    if func_string is not None:
+        function = func_string.get().strip()
 
     print(f"Updating plot with function: {function}")
 
@@ -199,11 +221,14 @@ tk.Label(
     padx=10
 )
 
+func_string = tk.StringVar(value=function)
+func_string.trace_add("write", lambda *args: update_plot())
+
 tk.Entry(
     controls_frame,
-    textvariable=(function_var := tk.StringVar(value=function)),
+    textvariable=func_string,
     width=20,
-    font=("Arial", 12)
+    font=("Arial", 12),
 ).grid(
     row=0,
     column=1,
@@ -227,7 +252,8 @@ start_slider = tk.Scale(
     to=5,
     resolution=0.1,
     orient=tk.HORIZONTAL,
-    length=350
+    length=350,
+    command=lambda e: update_plot()
 )
 
 start_slider.set(1.5)
@@ -253,7 +279,8 @@ iter_slider = tk.Scale(
     from_=1,
     to=10,
     orient=tk.HORIZONTAL,
-    length=350
+    length=350,
+    command=lambda e: update_plot()
 )
 
 iter_slider.set(5)
