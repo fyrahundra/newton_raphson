@@ -1,7 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
+import sympy as sp
 import matplotlib.pyplot as plt
 
 from matplotlib.backends.backend_tkagg import (
@@ -16,7 +19,7 @@ derivative = "1"
 # Parser för funktionsskrivning
 # =========================
 
-def parse_function(func_str):
+def parse_function(func_str: str) -> tuple[Callable[[Any], Any], str]:
     # Ersätt ^ med **
     func_str = func_str.replace("^", "**")
     print(f"Parsing function: {func_str}")
@@ -27,55 +30,83 @@ def parse_function(func_str):
         return func, func_str
     except Exception as e:
         print(f"Fel i funktionsskrivning: {e}")
-        return lambda x: 0
+        return (lambda x: 0, "0")
+    
+def symbolic_derivative(func_str: str, x_value: float, func: Callable[[Any], Any]) -> float:
+    x_symbol = sp.symbols("x")
+    try:
+        func_expr = sp.sympify(func_str)
+        derivative_expr = sp.diff(func_expr, x_symbol)
+        derivative_func = sp.lambdify(x_symbol, derivative_expr, modules=["numpy", "math"])
+        return float(derivative_func(x_value)), str(derivative_expr)
+    except Exception as e:
+        print(f"Fel i derivatberäkning: {e}. Kör numerisk derivata istället.")
+        return numerical_derivative(func, x_value)
 
-def common_derivative(func_str):
-    derivative_str = "1"
-    if "x**" in func_str:
-        power = func_str.split("x**")[1].split()[0]
-        if power.isdigit():
-            n = int(power)
-            derivative_str = f"{n}*x**{n-1}"
-    elif "x" in func_str:
-        derivative_str = "1"
-    return derivative_str
+def numerical_derivative(func: Callable[[Any], Any], x_value: float, h: float = 1e-5) -> float:
+    return float((func(x_value + h) - func(x_value - h)) / (2 * h))
+
 # =========================
 # Funktion och derivata
 # =========================
 
-def f(x):
-    print(f"parse_function(function)(x): {parse_function(function)[1]} with x={x}")
-    return parse_function(function)[0](x)
+def f(x: Any) -> Any:
+    func, parsed_function = parse_function(function)
+    print(f"parse_function(function)(x): {parsed_function} with x={x}")
+    return func(x)
 
-def derivative_fallback(x):
-    h = 1e-7
-    return (f(x + h) - f(x - h)) / (2 * h)
+def df(x: Any) -> Any:
+    derivative_value, derivative_expr = symbolic_derivative(function, x, f)
+    print(f"derivative: {derivative_value} ({derivative_expr})")
+    return derivative_value
 
-def df(x):
-    return parse_function(common_derivative(function))[0](x)
+# ========================
+# Kontrollera int och float för input
+# ========================
+
+def validate_float(value: str) -> bool:
+    if value == "" or value == "-":
+        return True  # Tillåt tomt eller bara minustecken (under skrivning)
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+def validate_pos_int(value: str) -> bool:
+    if value == "":
+        return True
+    try:
+        int(value)
+        return int(value) > 0
+    except ValueError:
+        return False
 
 # =========================
 # Newton-Raphson
 # =========================
 
-def newton_raphson(x0, iterations):
+def newton_raphson(x0: float, iterations: int) -> tuple[list[tuple[float, float]], list[tuple[int, float, float, float]], float]:
 
     points = []
+    iteration_rows = []
 
     x = x0
 
     for i in range(iterations):
 
         y = f(x)
+        dy = df(x)
 
         points.append((x, y))
+        iteration_rows.append((i + 1, x, y, dy))
 
-        if df(x) == 0:
+        if dy == 0:
             break
 
-        x = x - y / df(x)
+        x = x - y / dy
 
-    return points, x
+    return points, iteration_rows, x
 
 # =========================
 # Uppdatera graf
@@ -84,7 +115,7 @@ def newton_raphson(x0, iterations):
 def callback():
     update_plot()
 
-def update_plot():
+def update_plot() -> None:
 
     global function
 
@@ -96,7 +127,7 @@ def update_plot():
     x0 = float(start_slider.get())
     iterations = int(iter_slider.get())
 
-    points, root_approx = newton_raphson(
+    points, iteration_rows, root_approx = newton_raphson(
         x0,
         iterations
     )
@@ -181,9 +212,25 @@ def update_plot():
 
     ax.legend()
 
+    for row in iteration_table.get_children():
+        iteration_table.delete(row)
+
+    for iteration, x_value, function_value, derivative_value in iteration_rows:
+        iteration_table.insert(
+            "",
+            tk.END,
+            values=(
+                iteration,
+                f"{x_value:.6f}",
+                f"{function_value:.6f}",
+                f"{derivative_value:.6f}"
+            )
+        )
+
+    approx = points[-1][0] if points else root_approx
     # Resultattext
     result_label.config(
-        text=f"Approximation av 0 ≈ {root_approx:.10f}"
+        text=f"Approximation av {function} ≈ {approx:.10f}"
     )
 
     # Uppdatera canvas
@@ -199,6 +246,9 @@ root.title("Newton-Raphson Visualisering")
 
 # Starta maximerat
 root.state("zoomed")
+
+intrcmd = (root.register(validate_pos_int), "%P")
+startcmd = (root.register(validate_float), "%P")
 
 # =========================
 # Kontrollpanel
@@ -274,13 +324,24 @@ tk.Label(
     padx=10
 )
 
+def on_iter_slider(_=None):
+    try:
+        v = int(float(iter_slider.get()))
+    except Exception:
+        v = 1
+    if v < 1:
+        v = 1
+    iter_slider.set(v)
+    update_plot()
+
 iter_slider = tk.Scale(
     controls_frame,
     from_=1,
     to=10,
+    resolution=1,
     orient=tk.HORIZONTAL,
     length=350,
-    command=lambda e: update_plot()
+    command=on_iter_slider
 )
 
 iter_slider.set(5)
@@ -290,19 +351,90 @@ iter_slider.grid(
     column=1
 )
 
-# Uppdateringsknapp
-update_button = ttk.Button(
-    controls_frame,
-    text="Uppdatera Graf",
-    command=update_plot
+# Slider range controls
+def update_slider_ranges() -> None:
+    # sanitize numeric input (allow comma decimals)
+    smin_str = start_min_var.get().strip().replace(',', '.')
+    smax_str = start_max_var.get().strip().replace(',', '.')
+    if not smin_str or not smax_str:
+        return
+    try:
+        smin = float(smin_str)
+        smax = float(smax_str)
+    except Exception:
+        return
+
+    imax_str = iter_max_var.get().strip().replace(',', '.')
+    if not imax_str:
+        return
+    try:
+        imax = int(float(imax_str))
+    except Exception:
+        return
+
+    # apply to sliders
+    start_slider.config(from_=smin, to=smax)
+    # clamp current start value
+    try:
+        cur = float(start_slider.get())
+        if cur < smin:
+            start_slider.set(smin)
+        elif cur > smax:
+            start_slider.set(smax)
+    except Exception:
+        pass
+
+    iter_slider.config(from_=1, to=imax)
+    try:
+        curi = int(iter_slider.get())
+        if curi > imax:
+            iter_slider.set(imax)
+    except Exception:
+        pass
+
+    update_plot()
+
+# Vars and UI for ranges
+start_min_var = tk.StringVar(value=str(start_slider.cget('from')))
+start_max_var = tk.StringVar(value=str(start_slider.cget('to')))
+iter_max_var = tk.StringVar(value=str(iter_slider.cget('to')))
+
+tk.Label(controls_frame, text="Start min", font=("Arial", 10)).grid(row=4, column=0, padx=5)
+tk.Entry(
+    controls_frame, 
+    textvariable=start_min_var, 
+    width=8,
+    validatecommand=startcmd
+).grid(
+    row=4, 
+    column=1
+)
+tk.Label(controls_frame, text="Start max", font=("Arial", 10)).grid(row=4, column=2, padx=5)
+tk.Entry(
+    controls_frame, 
+    textvariable=start_max_var, 
+    width=8,
+    validatecommand=startcmd
+).grid(
+    row=4, 
+    column=3
 )
 
-update_button.grid(
-    row=3,
-    column=0,
-    columnspan=2,
-    pady=10
+tk.Label(controls_frame, text="Iter max", font=("Arial", 10)).grid(row=5, column=2, padx=5)
+tk.Entry(
+    controls_frame, 
+    textvariable=iter_max_var, 
+    width=8,
+    validatecommand=intrcmd
+).grid(
+    row=5, 
+    column=3
 )
+
+# trace changes
+start_min_var.trace_add("write", lambda *args: update_slider_ranges())
+start_max_var.trace_add("write", lambda *args: update_slider_ranges())
+iter_max_var.trace_add("write", lambda *args: update_slider_ranges())
 
 # =========================
 # Resultatlabel
@@ -322,13 +454,77 @@ result_label.pack(
 # Matplotlib figur
 # =========================
 
+content_frame = tk.Frame(root)
+
+content_frame.pack(
+    fill=tk.BOTH,
+    expand=True
+)
+
+plot_frame = tk.Frame(content_frame)
+
+plot_frame.pack(
+    side=tk.LEFT,
+    fill=tk.BOTH,
+    expand=True,
+    padx=(10, 5),
+    pady=5
+)
+
+table_frame = tk.Frame(content_frame)
+
+table_frame.pack(
+    side=tk.RIGHT,
+    fill=tk.Y,
+    padx=(5, 10),
+    pady=5
+)
+
+table_title = tk.Label(
+    table_frame,
+    text="Iterationer",
+    font=("Arial", 12, "bold")
+)
+
+table_title.pack(pady=(0, 8))
+
+table_columns = ("iteration", "x", "f(x)", "f'(x)")
+
+iteration_table = ttk.Treeview(
+    table_frame,
+    columns=table_columns,
+    show="headings",
+    height=15
+)
+
+iteration_table.heading("iteration", text="Iter")
+iteration_table.heading("x", text="x")
+iteration_table.heading("f(x)", text="f(x)")
+iteration_table.heading("f'(x)", text="f'(x)")
+
+iteration_table.column("iteration", width=60, anchor="center")
+iteration_table.column("x", width=110, anchor="e")
+iteration_table.column("f(x)", width=110, anchor="e")
+iteration_table.column("f'(x)", width=110, anchor="e")
+
+table_scrollbar = ttk.Scrollbar(
+    table_frame,
+    orient=tk.VERTICAL,
+    command=iteration_table.yview
+)
+
+iteration_table.configure(yscrollcommand=table_scrollbar.set)
+
+iteration_table.pack(side=tk.LEFT, fill=tk.Y)
+table_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
 fig, ax = plt.subplots(
     figsize=(10, 6)
 )
 
 canvas = FigureCanvasTkAgg(
     fig,
-    master=root
+    master=plot_frame
 )
 
 canvas_widget = canvas.get_tk_widget()
